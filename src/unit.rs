@@ -245,11 +245,7 @@ fn connect_inner(
     body: SizedReader,
     history: &[Url],
 ) -> Result<Response, Error> {
-    let host = unit
-        .url
-        .host_str()
-        // This unwrap is ok because Request::parse_url() ensure there is always a host present.
-        .unwrap();
+    let host = unit.url.host_str();
     let url = &unit.url;
     let method = &unit.method;
     // open socket
@@ -343,9 +339,13 @@ fn extract_cookies(agent: &Agent, url: &Url) -> Option<Header> {
 }
 
 /// Connect the socket, either by using the pool or grab a new one.
-fn connect_socket(unit: &Unit, hostname: &str, use_pooled: bool) -> Result<(Stream, bool), Error> {
+fn connect_socket(
+    unit: &Unit,
+    hostname: Option<&str>,
+    use_pooled: bool,
+) -> Result<(Stream, bool), Error> {
     match unit.url.scheme() {
-        "http" | "https" | "test" => (),
+        "http" | "https" | "unix" | "test" => (),
         scheme => return Err(ErrorKind::UnknownScheme.msg(format!("unknown scheme '{}'", scheme))),
     };
     if unit.url.scheme() != "https" && unit.agent.config.https_only {
@@ -367,8 +367,9 @@ fn connect_socket(unit: &Unit, hostname: &str, use_pooled: bool) -> Result<(Stre
         }
     }
     let stream = match unit.url.scheme() {
-        "http" => stream::connect_http(unit, hostname),
-        "https" => stream::connect_https(unit, hostname),
+        "http" => stream::connect_http(unit, hostname.unwrap()),
+        "https" => stream::connect_https(unit, hostname.unwrap()),
+        "unix" => stream::connect_uds(unit, unit.url.path()),
         "test" => connect_test(unit),
         scheme => Err(ErrorKind::UnknownScheme.msg(format!("unknown scheme {}", scheme))),
     };
@@ -407,16 +408,25 @@ fn send_prelude(unit: &Unit, stream: &mut Stream) -> io::Result<()> {
     // build into a buffer and send in one go.
     let mut prelude = PreludeBuilder::new();
 
+    // TODO(bschwind) - This is pretty hacky
+    let path = if unit.url.scheme() == "unix" {
+        "/"
+    } else {
+        unit.url.path()
+    };
+
     // request line
-    prelude.write_request_line(
-        &unit.method,
-        unit.url.path(),
-        unit.url.query().unwrap_or_default(),
-    )?;
+    prelude.write_request_line(&unit.method, path, unit.url.query().unwrap_or_default())?;
 
     // host header if not set by user.
     if !header::has_header(&unit.headers, "host") {
-        let host = unit.url.host().unwrap();
+        // TODO(bschwind) - Also pretty hacky
+        let host = if let Some(host) = unit.url.host() {
+            host.to_string()
+        } else {
+            "".to_string()
+        };
+
         match unit.url.port() {
             Some(port) => {
                 let scheme_default: u16 = match unit.url.scheme() {

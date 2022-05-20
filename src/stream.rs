@@ -2,6 +2,7 @@ use log::debug;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::net::TcpStream;
+use std::os::unix::net::UnixStream;
 use std::time::Duration;
 use std::time::Instant;
 use std::{fmt, io::Cursor};
@@ -32,6 +33,15 @@ pub trait ReadWrite: Read + Write + Send + fmt::Debug + 'static {
 impl ReadWrite for TcpStream {
     fn socket(&self) -> Option<&TcpStream> {
         Some(self)
+    }
+    fn is_poolable(&self) -> bool {
+        true
+    }
+}
+
+impl ReadWrite for UnixStream {
+    fn socket(&self) -> Option<&TcpStream> {
+        None
     }
     fn is_poolable(&self) -> bool {
         true
@@ -231,6 +241,12 @@ impl Stream {
         })
     }
 
+    fn from_uds_stream(t: UnixStream) -> Stream {
+        Stream::logged_create(Stream {
+            inner: BufReader::new(Box::new(t)),
+        })
+    }
+
     // Check if the server has closed a stream by performing a one-byte
     // non-blocking read. If this returns EOF, the server has closed the
     // connection: return true. If this returns a successful read, there are
@@ -349,6 +365,24 @@ pub(crate) fn connect_http(unit: &Unit, hostname: &str) -> Result<Stream, Error>
     let port = unit.url.port().unwrap_or(80);
 
     connect_host(unit, hostname, port).map(Stream::from_tcp_stream)
+}
+
+pub(crate) fn connect_uds(unit: &Unit, unix_path: &str) -> Result<Stream, Error> {
+    let stream = UnixStream::connect(unix_path)?;
+
+    if let Some(deadline) = unit.deadline {
+        stream.set_read_timeout(Some(time_until_deadline(deadline)?))?;
+    } else {
+        stream.set_read_timeout(unit.agent.config.timeout_read)?;
+    }
+
+    if let Some(deadline) = unit.deadline {
+        stream.set_write_timeout(Some(time_until_deadline(deadline)?))?;
+    } else {
+        stream.set_write_timeout(unit.agent.config.timeout_write)?;
+    }
+
+    Ok(Stream::from_uds_stream(stream))
 }
 
 pub(crate) fn connect_https(unit: &Unit, hostname: &str) -> Result<Stream, Error> {

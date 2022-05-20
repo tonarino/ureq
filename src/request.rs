@@ -81,7 +81,7 @@ impl Request {
     fn parse_url(&self) -> Result<Url> {
         Ok(self.url.parse().and_then(|url: Url|
             // No hostname is fine for urls in general, but not for website urls.
-            if url.host_str().is_none() {
+            if url.scheme() != "unix" && url.host_str().is_none() {
                 Err(ParseError::EmptyHost)
             } else {
                 Ok(url)
