@@ -159,6 +159,9 @@ pub enum Error {
     /// This typically indicates a fault in bespoke `Connector` chains.
     TlsRequired,
 
+    /// An error occurred within a middleware.
+    Middleware(Box<dyn std::error::Error + Send + Sync>),
+
     /// Some other error occured.
     ///
     /// This is an escape hatch for bespoke connector chains having errors that don't naturally
@@ -261,6 +264,7 @@ impl fmt::Display for Error {
             Error::Json(v) => write!(f, "json: {}", v),
             Error::ConnectProxyFailed(v) => write!(f, "CONNECT proxy failed: {}", v),
             Error::TlsRequired => write!(f, "TLS required, but transport is unsecured"),
+            Error::Middleware(v) => write!(f, "middleware: {}", v),
             Error::Other(v) => write!(f, "other: {}", v),
             Error::BodyStalled => write!(f, "body data reading stalled"),
         }

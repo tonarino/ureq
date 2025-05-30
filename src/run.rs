@@ -104,13 +104,6 @@ pub(crate) fn run(
 
     let response = Response::from_parts(parts, body);
 
-    let status = response.status();
-    let is_err = status.is_client_error() || status.is_server_error();
-
-    if config.http_status_as_error() && is_err {
-        return Err(Error::StatusCode(status.as_u16()));
-    }
-
     Ok(response)
 }
 

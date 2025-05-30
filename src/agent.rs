@@ -237,7 +237,21 @@ impl Agent {
         let request = http::Request::from_parts(parts, body);
 
         let next = MiddlewareNext::new(self);
-        next.handle(request)
+        let result = next.handle(request);
+
+        match result {
+            Ok(response) => {
+                let status = response.status();
+                let is_err = status.is_client_error() || status.is_server_error();
+
+                if self.config.http_status_as_error() && is_err {
+                    Err(Error::StatusCode(status.as_u16()))
+                } else {
+                    Ok(response)
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Get the config for this agent.
